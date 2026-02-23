@@ -405,77 +405,125 @@ struct WidgetViewData {
 
 struct WidgetView: View {
     let data: WidgetViewData?
+    let needsSetup: Bool
+    var onSettings: (() -> Void)? = nil
+    var onRefresh: (() -> Void)? = nil
+    var onQuit: (() -> Void)? = nil
 
     var body: some View {
-        if let data = data {
-            VStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 6)
-                    Circle()
-                        .trim(from: 0, to: min(data.utilization / 100.0, 1.0))
-                        .stroke(statusColor(data.status), style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .animation(.easeInOut(duration: 0.5), value: data.utilization)
-
-                    VStack(spacing: 1) {
-                        Text("\(Int(data.utilization))%")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(.primary)
-                        Text(data.metricName)
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                .frame(width: 76, height: 76)
-
-                Text("Resets \(data.resetTimeString)")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-
-                if let expected = data.expectedUsage {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(statusColor(data.status))
-                            .frame(width: 6, height: 6)
-                        Text("pace: \(Int(expected))%")
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                }
+        Group {
+            if needsSetup {
+                setupView
+            } else if let data = data {
+                dataView(data)
+            } else {
+                loadingView
             }
-            .padding(14)
-            .frame(width: 130, height: 150)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-        } else {
-            VStack(spacing: 8) {
-                ProgressView()
-                    .scaleEffect(0.8)
-                Text("Loading...")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            .padding(14)
-            .frame(width: 130, height: 150)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
+        .contextMenu {
+            Button("Settings...") { onSettings?() }
+            Button("Refresh") { onRefresh?() }
+            Divider()
+            Button("Quit") { onQuit?() }
+        }
+    }
+
+    func dataView(_ data: WidgetViewData) -> some View {
+        VStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: min(data.utilization / 100.0, 1.0))
+                    .stroke(statusColor(data.status), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.5), value: data.utilization)
+
+                VStack(spacing: 1) {
+                    Text("\(Int(data.utilization))%")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                    Text(data.metricName)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 76, height: 76)
+
+            Text("Resets \(data.resetTimeString)")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+
+            if let expected = data.expectedUsage {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor(data.status))
+                        .frame(width: 6, height: 6)
+                    Text("pace: \(Int(expected))%")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(width: 130, height: 150)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    var setupView: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 24))
+                .foregroundColor(.orange)
+            Text("Setup Needed")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.primary)
+            Text("Right-click to\nopen Settings")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(14)
+        .frame(width: 130, height: 150)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    var loadingView: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.8)
+            Text("Loading...")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .padding(14)
+        .frame(width: 130, height: 150)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     func statusColor(_ status: AppDelegate.UsageStatus) -> Color {
@@ -496,16 +544,21 @@ class WidgetPanelController {
     private let posXKey = "widgetPositionX"
     private let posYKey = "widgetPositionY"
     private let widgetVisibleKey = "widgetVisible"
+    private let hasLaunchedKey = "hasLaunchedBefore"
+
+    var onSettings: (() -> Void)?
+    var onRefresh: (() -> Void)?
+    var onQuit: (() -> Void)?
 
     var isVisible: Bool {
         panel?.isVisible ?? false
     }
 
-    func show(with data: WidgetViewData?) {
+    func show(with data: WidgetViewData?, needsSetup: Bool = false) {
         if panel == nil {
             createPanel()
         }
-        updateContent(with: data)
+        updateContent(with: data, needsSetup: needsSetup)
         panel?.orderFront(nil)
         UserDefaults.standard.set(true, forKey: widgetVisibleKey)
     }
@@ -515,21 +568,35 @@ class WidgetPanelController {
         UserDefaults.standard.set(false, forKey: widgetVisibleKey)
     }
 
-    func toggle(with data: WidgetViewData?) {
+    func toggle(with data: WidgetViewData?, needsSetup: Bool = false) {
         if isVisible {
             hide()
         } else {
-            show(with: data)
+            show(with: data, needsSetup: needsSetup)
         }
     }
 
-    func updateContent(with data: WidgetViewData?) {
+    func updateContent(with data: WidgetViewData?, needsSetup: Bool = false) {
         guard let hostingView = hostingView else { return }
-        hostingView.rootView = WidgetView(data: data)
+        hostingView.rootView = WidgetView(
+            data: data,
+            needsSetup: needsSetup,
+            onSettings: onSettings,
+            onRefresh: onRefresh,
+            onQuit: onQuit
+        )
     }
 
     var shouldRestoreOnLaunch: Bool {
         UserDefaults.standard.bool(forKey: widgetVisibleKey)
+    }
+
+    var isFirstLaunch: Bool {
+        !UserDefaults.standard.bool(forKey: hasLaunchedKey)
+    }
+
+    func markLaunched() {
+        UserDefaults.standard.set(true, forKey: hasLaunchedKey)
     }
 
     private func createPanel() {
@@ -545,7 +612,13 @@ class WidgetPanelController {
         let rect = NSRect(x: x, y: y, width: 130, height: 150)
         panel = FloatingWidgetPanel(contentRect: rect)
 
-        let widgetView = WidgetView(data: nil)
+        let widgetView = WidgetView(
+            data: nil,
+            needsSetup: false,
+            onSettings: onSettings,
+            onRefresh: onRefresh,
+            onQuit: onQuit
+        )
         let hosting = NSHostingView(rootView: widgetView)
         hostingView = hosting
         panel?.contentView = hosting
@@ -580,15 +653,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         addLog("App launched")
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
+        // Set up menubar icon (may be hidden on macOS 26+ but keep as fallback)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.title = "⏱️"
             button.action = #selector(showMenu)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-
         menu = NSMenu()
+
+        // Wire up widget callbacks
+        widgetController.onSettings = { [weak self] in self?.openSettings() }
+        widgetController.onRefresh = { [weak self] in self?.fetchUsageData() }
+        widgetController.onQuit = { NSApplication.shared.terminate(nil) }
 
         NotificationCenter.default.addObserver(
             self,
@@ -603,9 +681,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.fetchUsageData()
         }
 
-        // Restore desktop widget if it was visible
-        if widgetController.shouldRestoreOnLaunch {
-            widgetController.show(with: currentWidgetData())
+        // Always show widget on launch — it IS the app
+        let needsSetup = (Preferences.shared.sessionKey ?? "").isEmpty || (Preferences.shared.organizationId ?? "").isEmpty
+        widgetController.show(with: currentWidgetData(), needsSetup: needsSetup)
+
+        // Auto-open settings on first launch
+        if widgetController.isFirstLaunch {
+            widgetController.markLaunched()
+            if needsSetup {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    self?.openSettings()
+                }
+            }
         }
     }
 
@@ -836,6 +923,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.consecutiveFailures += 1
                 self.statusItem.button?.title = "❌"
+                if self.widgetController.isVisible {
+                    self.widgetController.updateContent(with: nil, needsSetup: true)
+                }
             }
             return
         }
@@ -846,6 +936,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.consecutiveFailures += 1
                 self.statusItem.button?.title = "❌"
+                if self.widgetController.isVisible {
+                    self.widgetController.updateContent(with: nil, needsSetup: true)
+                }
             }
             return
         }
@@ -1012,9 +1105,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.title = displayParts.joined(separator: " ")
 
-        // Update desktop widget if visible
+        // Update desktop widget
         if widgetController.isVisible {
-            widgetController.updateContent(with: currentWidgetData())
+            widgetController.updateContent(with: currentWidgetData(), needsSetup: false)
         }
     }
 
