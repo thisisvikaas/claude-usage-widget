@@ -721,6 +721,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Fetch reliability tracking
     var logEntries: [(Date, String)] = []
     var consecutiveFailures: Int = 0
+    var isSessionExpired: Bool = false
     let maxRetries = 3
     let maxLogEntries = 50
 
@@ -770,6 +771,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleSettingsChanged() {
+        isSessionExpired = false  // Reset — user may have entered a new key
+        consecutiveFailures = 0
         fetchUsageData()
     }
 
@@ -979,6 +982,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func fetchUsageData(retryCount: Int) {
+        // Skip polling if session is expired — wait for user to update credentials via Settings
+        if isSessionExpired && retryCount == 0 {
+            return
+        }
+
         var sessionKey = Preferences.shared.sessionKey
         var organizationId = Preferences.shared.organizationId
 
@@ -1027,6 +1035,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         request.timeoutInterval = 15
         request.addValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
+        request.addValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ClaudeUsageWidget/1.0", forHTTPHeaderField: "User-Agent")
 
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
@@ -1044,13 +1053,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let msg = "HTTP \(httpResponse.statusCode) from API"
                 self.addLog(msg)
 
-                // 401/403 = session expired
+                // 401/403 could be session expired OR a Cloudflare challenge
                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                    DispatchQueue.main.async {
-                        self.consecutiveFailures += 1
-                        self.statusItem.button?.title = "🔑"
-                        if self.widgetController.isVisible {
-                            self.widgetController.updateContent(with: nil, state: .sessionExpired)
+                    // Check if this is a Cloudflare challenge (HTML response) vs real auth error (JSON)
+                    let isCloudflareChallenge: Bool
+                    if let responseData = data,
+                       let bodyStr = String(data: responseData, encoding: .utf8) {
+                        // Cloudflare challenges return HTML with distinctive markers
+                        isCloudflareChallenge = bodyStr.contains("Just a moment") ||
+                                                bodyStr.contains("cf-browser-verification") ||
+                                                bodyStr.contains("challenge-platform") ||
+                                                bodyStr.contains("_cf_chl_opt")
+                    } else {
+                        isCloudflareChallenge = false
+                    }
+
+                    if isCloudflareChallenge {
+                        // Cloudflare is blocking the request — treat as transient network error
+                        self.addLog("Cloudflare challenge detected (HTTP \(httpResponse.statusCode)) — retrying")
+                        self.handleFetchFailure(retryCount: retryCount)
+                    } else {
+                        // Real auth error — session expired
+                        self.addLog("Session expired (HTTP \(httpResponse.statusCode))")
+                        DispatchQueue.main.async {
+                            self.consecutiveFailures += 1
+                            self.isSessionExpired = true
+                            self.statusItem.button?.title = "🔑"
+                            if self.widgetController.isVisible {
+                                self.widgetController.updateContent(with: nil, state: .sessionExpired)
+                            }
                         }
                     }
                     return
@@ -1072,6 +1103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
                 DispatchQueue.main.async {
                     self.consecutiveFailures = 0
+                    self.isSessionExpired = false
                     self.usageData = usageData
                     self.updateMenuBarIcon()
                     self.addLog("Fetch OK")

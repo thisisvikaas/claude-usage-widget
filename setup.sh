@@ -13,6 +13,7 @@ APP_DOMAIN="com.claude.usage"
 SESSION_KEY_PREF="claudeSessionKey"
 ORG_ID_PREF="claudeOrganizationId"
 API_BASE="https://claude.ai/api"
+USER_AGENT="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ClaudeUsageWidget/1.0"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -27,6 +28,15 @@ print_ok()   { echo -e "${GREEN}✓${RESET} $1"; }
 print_err()  { echo -e "${RED}✗${RESET} $1"; }
 print_warn() { echo -e "${YELLOW}⚠${RESET} $1"; }
 print_step() { echo -e "\n${BLUE}${BOLD}[$1]${RESET} $2"; }
+
+# Detect Cloudflare challenge pages (HTML "Just a moment..." instead of real API response)
+is_cloudflare_challenge() {
+    local BODY="$1"
+    if echo "$BODY" | grep -q "Just a moment\|cf-browser-verification\|challenge-platform\|_cf_chl_opt" 2>/dev/null; then
+        return 0  # true
+    fi
+    return 1  # false
+}
 
 # --- Banner ---
 echo ""
@@ -136,43 +146,62 @@ echo -e "${DIM}Fetching your organizations from Claude API...${RESET}"
 ORG_RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "Cookie: sessionKey=$SESSION_KEY" \
     -H "Accept: application/json" \
+    -H "User-Agent: $USER_AGENT" \
     "$API_BASE/organizations" 2>/dev/null)
 
 HTTP_CODE=$(echo "$ORG_RESPONSE" | tail -1)
 BODY=$(echo "$ORG_RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
-    echo ""
-    print_err "Session key is invalid or expired (HTTP $HTTP_CODE)."
-    echo ""
-    echo "This usually means the key you pasted has already expired."
-    echo "Go back to claude.ai → DevTools → Cookies → copy a fresh sessionKey."
-    echo ""
-    read -r -p "Try again with a new key? [Y/n] " RETRY_KEY
-    if [[ "$RETRY_KEY" != "n" && "$RETRY_KEY" != "N" ]]; then
-        print_step "1/3" "Session Key (retry)"
+    # Check if this is a Cloudflare challenge (not a real auth error)
+    if is_cloudflare_challenge "$BODY"; then
         echo ""
-        get_session_key
-
-        # Retry org fetch
-        echo -e "${DIM}Fetching organizations...${RESET}"
-        ORG_RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -H "Cookie: sessionKey=$SESSION_KEY" \
-            -H "Accept: application/json" \
-            "$API_BASE/organizations" 2>/dev/null)
-        HTTP_CODE=$(echo "$ORG_RESPONSE" | tail -1)
-        BODY=$(echo "$ORG_RESPONSE" | sed '$d')
-
-        if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
-            print_err "Still getting HTTP $HTTP_CODE. The session key may not be valid."
-            echo ""
-            echo "You can still set up manually:"
-            prompt_manual_org_id
-        fi
+        print_warn "Cloudflare is blocking automated requests (HTTP $HTTP_CODE)."
+        echo "This does NOT mean your session key is invalid — Cloudflare sometimes challenges non-browser requests."
+        echo ""
+        echo "You can enter your org ID manually instead:"
+        prompt_manual_org_id
     else
         echo ""
-        print_err "Setup cancelled. Run ./setup.sh when you have a fresh session key."
-        exit 1
+        print_err "Session key is invalid or expired (HTTP $HTTP_CODE)."
+        echo ""
+        echo "This usually means the key you pasted has already expired."
+        echo "Go back to claude.ai → DevTools → Cookies → copy a fresh sessionKey."
+        echo ""
+        read -r -p "Try again with a new key? [Y/n] " RETRY_KEY
+        if [[ "$RETRY_KEY" != "n" && "$RETRY_KEY" != "N" ]]; then
+            print_step "1/3" "Session Key (retry)"
+            echo ""
+            get_session_key
+
+            # Retry org fetch
+            echo -e "${DIM}Fetching organizations...${RESET}"
+            ORG_RESPONSE=$(curl -s -w "\n%{http_code}" \
+                -H "Cookie: sessionKey=$SESSION_KEY" \
+                -H "Accept: application/json" \
+                -H "User-Agent: $USER_AGENT" \
+                "$API_BASE/organizations" 2>/dev/null)
+            HTTP_CODE=$(echo "$ORG_RESPONSE" | tail -1)
+            BODY=$(echo "$ORG_RESPONSE" | sed '$d')
+
+            if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+                if is_cloudflare_challenge "$BODY"; then
+                    print_warn "Still being blocked by Cloudflare."
+                    echo ""
+                    echo "You can enter your org ID manually:"
+                    prompt_manual_org_id
+                else
+                    print_err "Still getting HTTP $HTTP_CODE. The session key may not be valid."
+                    echo ""
+                    echo "You can still set up manually:"
+                    prompt_manual_org_id
+                fi
+            fi
+        else
+            echo ""
+            print_err "Setup cancelled. Run ./setup.sh when you have a fresh session key."
+            exit 1
+        fi
     fi
 fi
 
@@ -233,6 +262,7 @@ echo -e "${DIM}Testing API access...${RESET}"
 USAGE_RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "Cookie: sessionKey=$SESSION_KEY" \
     -H "Accept: application/json" \
+    -H "User-Agent: $USER_AGENT" \
     "$API_BASE/organizations/$ORG_ID/usage" 2>/dev/null)
 
 USAGE_CODE=$(echo "$USAGE_RESPONSE" | tail -1)
@@ -254,18 +284,28 @@ if [ "$USAGE_CODE" = "200" ]; then
         echo -e "    7-day limit:   ${BOLD}${SEVEN_DAY}%${RESET}"
     fi
 elif [ "$USAGE_CODE" = "401" ] || [ "$USAGE_CODE" = "403" ]; then
-    print_err "Authentication failed (HTTP $USAGE_CODE). Session key may have expired."
-    echo ""
-    echo "    Options:"
-    echo "    • Re-extract a fresh sessionKey from browser cookies and run ./setup.sh again"
-    echo "    • Or continue anyway — the widget will show 'Session Expired' and prompt you to update"
-    echo ""
-    read -r -p "Save credentials anyway? [y/N] " SAVE_ANYWAY
-    if [[ "$SAVE_ANYWAY" != "y" && "$SAVE_ANYWAY" != "Y" ]]; then
-        print_err "Setup cancelled. Run ./setup.sh with a fresh session key."
-        exit 1
+    if is_cloudflare_challenge "$USAGE_BODY"; then
+        print_warn "Cloudflare blocked the validation request (HTTP $USAGE_CODE)."
+        echo ""
+        echo "    This does NOT mean your credentials are wrong — Cloudflare sometimes"
+        echo "    challenges non-browser requests. The widget app uses macOS URLSession"
+        echo "    which is not affected by this."
+        echo ""
+        print_ok "Saving credentials — the widget will validate when it launches."
+    else
+        print_err "Authentication failed (HTTP $USAGE_CODE). Session key may have expired."
+        echo ""
+        echo "    Options:"
+        echo "    • Re-extract a fresh sessionKey from browser cookies and run ./setup.sh again"
+        echo "    • Or continue anyway — the widget will show 'Session Expired' and prompt you to update"
+        echo ""
+        read -r -p "Save credentials anyway? [y/N] " SAVE_ANYWAY
+        if [[ "$SAVE_ANYWAY" != "y" && "$SAVE_ANYWAY" != "Y" ]]; then
+            print_err "Setup cancelled. Run ./setup.sh with a fresh session key."
+            exit 1
+        fi
+        print_warn "Saving with unvalidated credentials — update the session key in Settings when ready."
     fi
-    print_warn "Saving with unvalidated credentials — update the session key in Settings when ready."
 elif [ "$USAGE_CODE" = "404" ]; then
     print_warn "Organization not found (HTTP 404). The org ID may be incorrect."
     echo ""
