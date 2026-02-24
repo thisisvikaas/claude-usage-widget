@@ -247,7 +247,7 @@ open build/ClaudeUsage.app
 
 ## Credits
 
-Built on top of [claude-usage](https://github.com/amoga-org/claude-usage) by amoga-org. Desktop widget adaptation by [@rishiatlan](https://github.com/rishiatlan).
+Built on top of [claude-usage](https://github.com/amoga-org/claude-usage) by amoga.io Desktop widget adaptation by [@rishiatlan](https://github.com/rishiatlan).
 
 ## License
 
