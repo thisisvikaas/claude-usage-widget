@@ -716,7 +716,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var usageData: UsageResponse?
     var timer: Timer?
     var settingsWindowController: SettingsWindowController?
-    var widgetController = WidgetPanelController()
 
     // Fetch reliability tracking
     var logEntries: [(Date, String)] = []
@@ -737,11 +736,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu = NSMenu()
 
-        // Wire up widget callbacks
-        widgetController.onSettings = { [weak self] in self?.openSettings() }
-        widgetController.onRefresh = { [weak self] in self?.fetchUsageData() }
-        widgetController.onQuit = { NSApplication.shared.terminate(nil) }
-
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleSettingsChanged),
@@ -755,17 +749,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.fetchUsageData()
         }
 
-        // Always show widget on launch — it IS the app
-        let launchState: WidgetState = ((Preferences.shared.sessionKey ?? "").isEmpty || (Preferences.shared.organizationId ?? "").isEmpty) ? .needsSetup : .ok
-        widgetController.show(with: currentWidgetData(), state: launchState)
-
-        // Auto-open settings on first launch
-        if widgetController.isFirstLaunch {
-            widgetController.markLaunched()
-            if launchState == .needsSetup {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    self?.openSettings()
-                }
+        // Auto-open settings on first launch if credentials not set
+        let sessionKey = Preferences.shared.sessionKey ?? ""
+        let organizationId = Preferences.shared.organizationId ?? ""
+        if sessionKey.isEmpty || organizationId.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.openSettings()
             }
         }
     }
@@ -856,8 +845,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(logItem)
 
         menu.addItem(NSMenuItem.separator())
-        let widgetTitle = widgetController.isVisible ? "Hide Desktop Widget" : "Show Desktop Widget"
-        menu.addItem(NSMenuItem(title: widgetTitle, action: #selector(toggleWidget), keyEquivalent: "w"))
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refreshClicked), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitClicked), keyEquivalent: "q"))
@@ -906,38 +893,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func quitClicked() {
         NSApplication.shared.terminate(self)
-    }
-
-    @objc func toggleWidget() {
-        widgetController.toggle(with: currentWidgetData())
-    }
-
-    func currentWidgetData() -> WidgetViewData? {
-        guard let data = usageData else { return nil }
-        let metric = Preferences.shared.selectedMetric
-        guard let (utilization, resetDateString, name) = getSelectedMetricData(from: data, metric: metric) else { return nil }
-
-        let status: UsageStatus
-        let expectedUsage: Double?
-        let resetTimeString: String
-
-        if let resetDate = resetDateString {
-            status = calculateStatus(utilization: utilization, resetDateString: resetDate, metric: metric)
-            expectedUsage = calculateExpectedUsage(resetDateString: resetDate, metric: metric)
-            resetTimeString = formatResetTime(resetDate)
-        } else {
-            status = utilization >= 80 ? .exceeding : (utilization >= 50 ? .borderline : .onTrack)
-            expectedUsage = nil
-            resetTimeString = "unknown"
-        }
-
-        return WidgetViewData(
-            utilization: utilization,
-            expectedUsage: expectedUsage,
-            resetTimeString: resetTimeString,
-            metricName: name,
-            status: status
-        )
     }
 
     static let logDir: String = {
@@ -1004,9 +959,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.consecutiveFailures += 1
                 self.statusItem.button?.title = "❌"
-                if self.widgetController.isVisible {
-                    self.widgetController.updateContent(with: nil, state: .needsSetup)
-                }
             }
             return
         }
@@ -1017,9 +969,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self.consecutiveFailures += 1
                 self.statusItem.button?.title = "❌"
-                if self.widgetController.isVisible {
-                    self.widgetController.updateContent(with: nil, state: .needsSetup)
-                }
             }
             return
         }
@@ -1079,9 +1028,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             self.consecutiveFailures += 1
                             self.isSessionExpired = true
                             self.statusItem.button?.title = "🔑"
-                            if self.widgetController.isVisible {
-                                self.widgetController.updateContent(with: nil, state: .sessionExpired)
-                            }
                         }
                     }
                     return
@@ -1222,11 +1168,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         button.title = displayParts.joined(separator: " ")
-
-        // Update desktop widget
-        if widgetController.isVisible {
-            widgetController.updateContent(with: currentWidgetData(), state: .ok)
-        }
     }
 
     enum UsageStatus {
