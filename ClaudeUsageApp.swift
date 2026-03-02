@@ -1345,6 +1345,12 @@ struct UsageResponse: Codable {
 struct UsageLimit: Codable {
     let utilization: Double
     let resets_at: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.utilization = try container.decodeIfPresent(Double.self, forKey: .utilization) ?? 0.0
+        self.resets_at = try container.decodeIfPresent(String.self, forKey: .resets_at)
+    }
 }
 
 // MARK: - Main Entry Point
